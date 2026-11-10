@@ -109,7 +109,6 @@ def load_revenue_by_state():
         GROUP BY c.customer_state
         ORDER BY revenue DESC;
     """
-
     return pd.read_sql(query, get_engine())
 
 
@@ -134,9 +133,190 @@ def load_top_products():
     top_products["product_label"] = (
         top_products["product_id"].str[:8] + "..."
     )
-
     return top_products
 
+
+
+@st.cache_data(ttl=600)
+def load_customer_type_counts():
+    query = """
+        WITH customer_orders AS (
+            SELECT
+                c.customer_unique_id,
+                COUNT(DISTINCT o.order_id) AS order_count
+            FROM customers AS c
+            JOIN orders AS o
+                ON c.customer_id = o.customer_id
+            WHERE o.order_status = 'delivered'
+            GROUP BY c.customer_unique_id
+        )
+        SELECT
+            CASE
+                WHEN order_count > 1 THEN 'Repeat Customer'
+                ELSE 'New Customer'
+            END AS customer_type,
+            COUNT(*) AS customer_count
+        FROM customer_orders
+        GROUP BY
+            CASE
+                WHEN order_count > 1 THEN 'Repeat Customer'
+                ELSE 'New Customer'
+            END
+        ORDER BY customer_count DESC;
+    """
+    return pd.read_sql(query, get_engine())
+
+
+
+@st.cache_data(ttl=600)
+def load_top_customers():
+    query = """
+        WITH customer_spending AS (
+            SELECT
+                c.customer_unique_id,
+                COUNT(DISTINCT o.order_id) AS order_count,
+                SUM(oi.price + oi.freight_value) AS total_spending
+            FROM customers AS c
+            JOIN orders AS o
+                ON c.customer_id = o.customer_id
+            JOIN order_items AS oi
+                ON o.order_id = oi.order_id
+            WHERE o.order_status = 'delivered'
+            GROUP BY c.customer_unique_id
+        )
+        SELECT
+            customer_unique_id,
+            order_count,
+            ROUND(total_spending, 2) AS total_spending
+        FROM customer_spending
+        ORDER BY total_spending DESC
+        LIMIT 10;
+    """
+    top_customers = pd.read_sql(query, get_engine())
+
+    top_customers["customer_label"] = (
+        top_customers["customer_unique_id"].str[:8] + "..."
+    )
+    return top_customers
+
+
+
+@st.cache_data(ttl=600)
+def load_delivery_metrics():
+    query = """
+        SELECT
+            ROUND(
+                AVG(
+                    DATEDIFF(
+                        order_delivered_customer_date,
+                        order_purchase_timestamp
+                    )
+                ),
+                2
+            ) AS average_delivery_days,
+
+            SUM(
+                CASE
+                    WHEN order_delivered_customer_date
+                         <= order_estimated_delivery_date
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS on_time_orders,
+
+            SUM(
+                CASE
+                    WHEN order_delivered_customer_date
+                         > order_estimated_delivery_date
+                    THEN 1
+                    ELSE 0
+                END
+            ) AS delayed_orders
+
+        FROM orders
+        WHERE order_status = 'delivered'
+          AND order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL;
+    """
+    return pd.read_sql(query, get_engine())
+
+
+
+@st.cache_data(ttl=600)
+def load_delivery_status():
+    query = """
+        SELECT
+            CASE
+                WHEN order_delivered_customer_date
+                     <= order_estimated_delivery_date
+                THEN 'On Time'
+                ELSE 'Delayed'
+            END AS delivery_status,
+
+            COUNT(*) AS order_count
+
+        FROM orders
+        WHERE order_status = 'delivered'
+          AND order_delivered_customer_date IS NOT NULL
+          AND order_estimated_delivery_date IS NOT NULL
+
+        GROUP BY
+            CASE
+                WHEN order_delivered_customer_date
+                     <= order_estimated_delivery_date
+                THEN 'On Time'
+                ELSE 'Delayed'
+            END;
+    """
+
+    return pd.read_sql(query, get_engine())
+
+
+
+@st.cache_data(ttl=600)
+def load_delivery_vs_review_score():
+    query = """
+        WITH order_review_scores AS (
+            SELECT
+                order_id,
+                AVG(review_score) AS review_score
+            FROM reviews
+            GROUP BY order_id
+        ),
+
+        delivery_performance AS (
+            SELECT
+                o.order_id,
+
+                CASE
+                    WHEN o.order_delivered_customer_date
+                         <= o.order_estimated_delivery_date
+                    THEN 'On Time'
+                    ELSE 'Delayed'
+                END AS delivery_status,
+
+                r.review_score
+
+            FROM orders AS o
+            JOIN order_review_scores AS r
+                ON o.order_id = r.order_id
+
+            WHERE o.order_status = 'delivered'
+              AND o.order_delivered_customer_date IS NOT NULL
+              AND o.order_estimated_delivery_date IS NOT NULL
+        )
+
+        SELECT
+            delivery_status,
+            ROUND(AVG(review_score), 2) AS average_review_score,
+            COUNT(*) AS reviewed_orders
+
+        FROM delivery_performance
+
+        GROUP BY delivery_status
+        ORDER BY average_review_score DESC;
+    """
+    return pd.read_sql(query, get_engine())
 
 
 st.title("Cart2Insights Business Info Dashboard")
@@ -282,9 +462,110 @@ elif selected_page == "Sales Analysis":
 
 elif selected_page == "Customer Analysis":
     st.header("Customer Analysis")
-    st.info("Customer analysis charts will be added later.")
+
+    try:
+        customer_types = load_customer_type_counts()
+
+        st.subheader("New vs Repeat Customers")
+
+        st.bar_chart(
+            customer_types,
+            x="customer_type",
+            y="customer_count",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            customer_types,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Top 10 Customers by Total Spending")
+
+        top_customers = load_top_customers()
+
+        st.bar_chart(
+            top_customers,
+            x="customer_label",
+            y="total_spending",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            top_customers[
+                ["customer_unique_id", "order_count", "total_spending"]
+            ],
+            use_container_width=True,
+            hide_index=True
+        )
+
+    except Exception as error:
+        st.error("Could not load Customer Analysis.")
+        st.exception(error)
+
 
 
 elif selected_page == "Delivery Analysis":
     st.header("Delivery Analysis")
-    st.info("Delivery analysis charts will be added later.")
+
+    try:
+        delivery_metrics = load_delivery_metrics()
+
+        col1, col2, col3 = st.columns(3)
+
+        with col1:
+            st.metric(
+                "Average Delivery Time",
+                f"{delivery_metrics.loc[0, 'average_delivery_days']:.2f} days"
+            )
+
+        with col2:
+            st.metric(
+                "On-Time Deliveries",
+                f"{int(delivery_metrics.loc[0, 'on_time_orders']):,}"
+            )
+
+        with col3:
+            st.metric(
+                "Delayed Deliveries",
+                f"{int(delivery_metrics.loc[0, 'delayed_orders']):,}"
+            )
+
+        st.subheader("On-Time vs Delayed Orders")
+
+        delivery_status = load_delivery_status()
+
+        st.bar_chart(
+            delivery_status,
+            x="delivery_status",
+            y="order_count",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            delivery_status,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Delivery Performance vs Customer Review Score")
+
+        delivery_reviews = load_delivery_vs_review_score()
+
+        st.bar_chart(
+            delivery_reviews,
+            x="delivery_status",
+            y="average_review_score",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            delivery_reviews,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    except Exception as error:
+        st.error("Could not load Delivery Analysis.")
+        st.exception(error)
