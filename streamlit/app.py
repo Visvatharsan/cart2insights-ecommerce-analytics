@@ -319,6 +319,63 @@ def load_delivery_vs_review_score():
     return pd.read_sql(query, get_engine())
 
 
+
+@st.cache_data(ttl=600)
+def load_review_score_distribution():
+    query = """
+        SELECT
+            review_score,
+            COUNT(*) AS review_count
+        FROM reviews
+        GROUP BY review_score
+        ORDER BY review_score;
+    """
+
+    return pd.read_sql(query, get_engine())
+
+
+
+@st.cache_data(ttl=600)
+def load_reviews_by_category():
+    query = """
+        WITH order_review_scores AS (
+            SELECT
+                order_id,
+                AVG(review_score) AS review_score
+            FROM reviews
+            GROUP BY order_id
+        ),
+
+        order_categories AS (
+            SELECT DISTINCT
+                oi.order_id,
+                COALESCE(
+                    p.product_category_name,
+                    'Unknown'
+                ) AS category
+            FROM order_items AS oi
+            JOIN products AS p
+                ON oi.product_id = p.product_id
+        )
+
+        SELECT
+            oc.category,
+            ROUND(AVG(r.review_score), 2) AS average_review_score,
+            COUNT(*) AS reviewed_orders
+
+        FROM order_categories AS oc
+        JOIN order_review_scores AS r
+            ON oc.order_id = r.order_id
+
+        GROUP BY oc.category
+        HAVING COUNT(*) >= 50
+        ORDER BY average_review_score ASC
+        LIMIT 10;
+    """
+    return pd.read_sql(query, get_engine())
+
+
+
 st.title("Cart2Insights Business Info Dashboard")
 st.markdown("An interactive dashboard for analysing e-commerce performance")
 st.sidebar.header("Filters")
@@ -328,7 +385,8 @@ selected_page = st.sidebar.selectbox(
         "Overview",
         "Sales Analysis",
         "Customer Analysis",
-        "Delivery Analysis"
+        "Delivery Analysis",
+        "Customer Experience"
     ]
 )
 
@@ -568,4 +626,71 @@ elif selected_page == "Delivery Analysis":
 
     except Exception as error:
         st.error("Could not load Delivery Analysis.")
+        st.exception(error)
+
+
+
+elif selected_page == "Customer Experience":
+    st.header("Customer Experience")
+
+    try:
+        review_distribution = load_review_score_distribution()
+
+        total_reviews = review_distribution["review_count"].sum()
+
+        average_review_score = (
+            review_distribution["review_score"]
+            .mul(review_distribution["review_count"])
+            .sum()
+            / total_reviews
+        )
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.metric(
+                "Average Review Score",
+                f"{average_review_score:.2f} / 5"
+            )
+
+        with col2:
+            st.metric(
+                "Total Reviews",
+                f"{int(total_reviews):,}"
+            )
+
+        st.subheader("Review Score Distribution")
+
+        st.bar_chart(
+            review_distribution,
+            x="review_score",
+            y="review_count",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            review_distribution,
+            use_container_width=True,
+            hide_index=True
+        )
+
+        st.subheader("Categories with Lowest Average Review Score")
+
+        reviews_by_category = load_reviews_by_category()
+
+        st.bar_chart(
+            reviews_by_category,
+            x="category",
+            y="average_review_score",
+            use_container_width=True
+        )
+
+        st.dataframe(
+            reviews_by_category,
+            use_container_width=True,
+            hide_index=True
+        )
+
+    except Exception as error:
+        st.error("Could not load Customer Experience data.")
         st.exception(error)
