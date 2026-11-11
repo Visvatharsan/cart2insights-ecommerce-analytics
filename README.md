@@ -14,9 +14,6 @@ The project answers questions about:
 - payment methods and order outcomes.
 
 ## Dataset
-
-Source: [Brazilian E-Commerce Public Dataset by Olist](https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce)
-
 The project uses nine source tables:
 
 | Table | Description |
