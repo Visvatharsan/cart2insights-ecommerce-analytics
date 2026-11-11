@@ -159,4 +159,4 @@ SHOW TABLES;
 
 DESCRIBE customers;
 DESCRIBE orders;
-DESCRIBE order_items;category_translationproduct_category_name
+DESCRIBE order_items;
