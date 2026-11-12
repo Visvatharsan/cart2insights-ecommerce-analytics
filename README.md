@@ -184,8 +184,6 @@ The sidebar includes month, state, and category filters plus a data-refresh cont
 - Leading category: **beleza_saude**
 - Peak gross-order-value month: **November 2017**
 
-Detailed findings are available in [`docs/business_insights.md`](docs/business_insights.md).
-
 ## Security and reproducibility
 
 - Credentials are entered with `getpass()` in notebooks or read from Streamlit secrets.
