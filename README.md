@@ -67,10 +67,6 @@ Cart2Insights/
 |   |-- raw/                 # Downloaded source CSVs (ignored)
 |   |-- cleaned/             # Generated cleaned CSVs (ignored)
 |   `-- processed/           # Generated feature files (ignored)
-|-- docs/
-|   |-- ERD.md
-|   |-- business_insights.md
-|   `-- links.txt
 |-- notebooks/
 |   |-- 01_data_inspection.ipynb
 |   |-- 02_data_cleaning.ipynb
